@@ -812,12 +812,21 @@ async def chat_completions(request: ChatCompletionRequest):
     
     if request.stream:
         response = await create_chat_completions(payload, stream=True)
+
+        if response.status_code != 200:
+            try:
+                error_text = (await response.aread()).decode("utf-8", errors="replace")
+            finally:
+                await response.aclose()
+            raise HTTPException(status_code=response.status_code, detail=error_text)
         
         async def generate():
             try:
-                async for line in response.aiter_lines():
-                    if line:
-                        yield line + "\n"
+                # Important: forward the upstream SSE bytes without re-chunking
+                # by lines; dropping blank separator lines breaks SSE parsing.
+                async for chunk in response.aiter_bytes():
+                    if chunk:
+                        yield chunk
             finally:
                 await response.aclose()
         
