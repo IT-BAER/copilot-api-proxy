@@ -2,7 +2,7 @@
 
 A reverse proxy for the GitHub Copilot API that exposes it as an OpenAI and Anthropic compatible service. This allows you to use GitHub Copilot with any tool that supports the OpenAI Chat Completions API or the Anthropic Messages API, including to power [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview).
 
-> Inspired by [copilot-api](https://github.com/ericc-ch/copilot-api) and similar to [gemini-api-proxy](../gemini-api-proxy)
+> Inspired by [copilot-api](https://github.com/ericc-ch/copilot-api) and similar to [gemini-api-proxy](https://github.com/IT-BAER/)
 
 > [!WARNING]
 >
