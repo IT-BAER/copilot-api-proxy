@@ -1,0 +1,71 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data files
+data/*
+!data/.gitkeep
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets / credentials
+.env
+.env.*
+*.env
+*.key
+*.pem
+*.pfx
+*.p12
+*secret*.json
+*secret*.txt
+*token*.json
+*token*.txt
+*apikey*
+*api_key*
+*credential*
+*credentials*
+data/github_token.json
+
+# Backups
+*.bak
+*.backup
+*.old

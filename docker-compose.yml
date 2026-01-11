@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  copilot-api-proxy:
+    build: .
+    container_name: copilot-api-proxy
+    ports:
+      - "4141:4141"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PORT=4141
+      - HOST=0.0.0.0
+      - TOKEN_FILE=/app/data/github_token.json
+      - RATE_LIMIT=0
+      - WAIT_MODE=false
+      - SHOW_TOKEN=false
+      - ACCOUNT_TYPE=individual
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:4141/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

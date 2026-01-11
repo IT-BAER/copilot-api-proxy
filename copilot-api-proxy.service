@@ -1,0 +1,19 @@
+[Unit]
+Description=GitHub Copilot API Proxy (OpenAI & Anthropic Compatible)
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/opt/copilot-api-proxy
+Environment="PORT=4141"
+Environment="HOST=0.0.0.0"
+Environment="TOKEN_FILE=/opt/copilot-api-proxy/data/github_token.json"
+Environment="ACCOUNT_TYPE=individual"
+ExecStart=/opt/copilot-api-proxy/venv/bin/python -u app.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
