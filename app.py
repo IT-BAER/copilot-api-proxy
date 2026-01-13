@@ -1258,7 +1258,7 @@ async def stream_responses_format(chat_stream, response_id: str, model: str, cre
     yield f"event: response.output_item.added\ndata: {json.dumps({'type': 'response.output_item.added', 'output_index': 0, 'item': {'type': 'message', 'id': message_id, 'status': 'in_progress', 'role': 'assistant', 'content': []}})}\n\n"
     
     # Content part added
-    yield f"event: response.content_part.added\ndata: {json.dumps({'type': 'response.content_part.added', 'item_id': message_id, 'output_index': 0, 'content_index': 0, 'part': {'type': 'output_text', 'text': '', 'annotations': []}})}}\n\n"
+    yield f"event: response.content_part.added\ndata: {json.dumps({'type': 'response.content_part.added', 'item_id': message_id, 'output_index': 0, 'content_index': 0, 'part': {'type': 'output_text', 'text': '', 'annotations': []}})}\n\n"
     
     try:
         buffer = ""
@@ -1304,7 +1304,7 @@ async def stream_responses_format(chat_stream, response_id: str, model: str, cre
     yield f"event: response.content_part.done\ndata: {json.dumps({'type': 'response.content_part.done', 'item_id': message_id, 'output_index': 0, 'content_index': 0, 'part': {'type': 'output_text', 'text': full_content, 'annotations': []}})}\n\n"
     
     # Output item done
-    yield f"event: response.output_item.done\ndata: {json.dumps({'type': 'response.output_item.done', 'output_index': 0, 'item': {'type': 'message', 'id': message_id, 'status': 'completed', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': full_content, 'annotations': []}]}})}}\n\n"
+    yield f"event: response.output_item.done\ndata: {json.dumps({'type': 'response.output_item.done', 'output_index': 0, 'item': {'type': 'message', 'id': message_id, 'status': 'completed', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': full_content, 'annotations': []}]}})}\n\n"
     
     # Response done
     final_response = {
