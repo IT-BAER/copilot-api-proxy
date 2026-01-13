@@ -168,6 +168,7 @@ GitHub OAuth authentication flow with device code entry.
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/v1/chat/completions` | POST | OpenAI chat completion |
+| `/v1/responses` | POST | OpenAI Responses API |
 | `/v1/models` | GET | List available models |
 | `/v1/embeddings` | POST | Create embeddings |
 | `/v1/messages` | POST | Anthropic messages API |
@@ -218,10 +219,15 @@ print(message.content[0].text)
 ### cURL
 
 ```bash
-# OpenAI format
+# OpenAI Chat Completions format
 curl http://localhost:4141/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hello!"}]}'
+
+# OpenAI Responses API format
+curl http://localhost:4141/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "input": "Hello!"}'
 
 # Anthropic format
 curl http://localhost:4141/v1/messages \

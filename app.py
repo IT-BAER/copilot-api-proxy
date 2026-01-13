@@ -1107,6 +1107,393 @@ async def anthropic_count_tokens(request: Request):
     return {"input_tokens": estimated_tokens}
 
 # =============================================================================
+# Routes - OpenAI Responses API Compatible
+# =============================================================================
+
+# Storage for response objects (in-memory, limited)
+response_storage: Dict[str, dict] = {}
+RESPONSE_STORAGE_MAX = 100
+
+def translate_responses_input_to_messages(input_data: Any, instructions: Optional[str] = None) -> List[dict]:
+    """Translate Responses API input to chat messages format."""
+    messages = []
+    
+    # Add instructions as system message
+    if instructions:
+        messages.append({"role": "system", "content": instructions})
+    
+    # Handle simple string input
+    if isinstance(input_data, str):
+        messages.append({"role": "user", "content": input_data})
+        return messages
+    
+    # Handle array of input items
+    if isinstance(input_data, list):
+        for item in input_data:
+            if isinstance(item, str):
+                messages.append({"role": "user", "content": item})
+            elif isinstance(item, dict):
+                item_type = item.get("type", "message")
+                
+                if item_type == "message":
+                    role = item.get("role", "user")
+                    content = item.get("content", "")
+                    
+                    # Handle content blocks
+                    if isinstance(content, list):
+                        text_parts = []
+                        for block in content:
+                            if isinstance(block, dict):
+                                if block.get("type") in ("text", "input_text", "output_text"):
+                                    text_parts.append(block.get("text", ""))
+                                elif block.get("type") == "image_url":
+                                    # Pass through image_url blocks
+                                    text_parts.append(block)
+                            elif isinstance(block, str):
+                                text_parts.append(block)
+                        
+                        # If we have mixed content (text + images), keep as array
+                        if any(isinstance(p, dict) for p in text_parts):
+                            content = text_parts
+                        else:
+                            content = " ".join(text_parts)
+                    
+                    messages.append({"role": role, "content": content})
+                
+                elif item_type == "function_call_output":
+                    # Tool response
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": item.get("call_id", ""),
+                        "content": item.get("output", "")
+                    })
+    
+    return messages
+
+def translate_chat_response_to_responses_format(
+    chat_response: dict,
+    response_id: str,
+    model: str,
+    created_at: int
+) -> dict:
+    """Translate chat completion response to Responses API format."""
+    output = []
+    
+    choices = chat_response.get("choices", [])
+    for choice in choices:
+        message = choice.get("message", {})
+        role = message.get("role", "assistant")
+        content = message.get("content", "")
+        tool_calls = message.get("tool_calls", [])
+        
+        # Create message output item
+        if content:
+            output.append({
+                "type": "message",
+                "id": f"msg_{uuid.uuid4().hex[:40]}",
+                "status": "completed",
+                "role": role,
+                "content": [{
+                    "type": "output_text",
+                    "text": content,
+                    "annotations": []
+                }]
+            })
+        
+        # Handle tool calls
+        for tc in tool_calls:
+            output.append({
+                "type": "function_call",
+                "id": tc.get("id", f"call_{uuid.uuid4().hex[:24]}"),
+                "call_id": tc.get("id", ""),
+                "name": tc.get("function", {}).get("name", ""),
+                "arguments": tc.get("function", {}).get("arguments", "{}"),
+                "status": "completed"
+            })
+    
+    usage = chat_response.get("usage", {})
+    
+    return {
+        "id": response_id,
+        "object": "response",
+        "created_at": created_at,
+        "status": "completed",
+        "completed_at": int(time.time()),
+        "error": None,
+        "incomplete_details": None,
+        "instructions": None,
+        "max_output_tokens": None,
+        "model": chat_response.get("model", model),
+        "output": output,
+        "parallel_tool_calls": True,
+        "previous_response_id": None,
+        "reasoning": {"effort": None, "summary": None},
+        "store": True,
+        "temperature": 1.0,
+        "text": {"format": {"type": "text"}},
+        "tool_choice": "auto",
+        "tools": [],
+        "top_p": 1.0,
+        "truncation": "disabled",
+        "usage": {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens": usage.get("completion_tokens", 0),
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "total_tokens": usage.get("total_tokens", 0)
+        },
+        "user": None,
+        "metadata": {}
+    }
+
+async def stream_responses_format(chat_stream, response_id: str, model: str, created_at: int):
+    """Stream chat completion as Responses API SSE format."""
+    message_id = f"msg_{uuid.uuid4().hex[:40]}"
+    full_content = ""
+    
+    # Initial response.created event
+    yield f"event: response.created\ndata: {json.dumps({'type': 'response.created', 'response': {'id': response_id, 'object': 'response', 'status': 'in_progress', 'created_at': created_at, 'model': model, 'output': []}})}\n\n"
+    
+    # Output item added event
+    yield f"event: response.output_item.added\ndata: {json.dumps({'type': 'response.output_item.added', 'output_index': 0, 'item': {'type': 'message', 'id': message_id, 'status': 'in_progress', 'role': 'assistant', 'content': []}})}\n\n"
+    
+    # Content part added
+    yield f"event: response.content_part.added\ndata: {json.dumps({'type': 'response.content_part.added', 'item_id': message_id, 'output_index': 0, 'content_index': 0, 'part': {'type': 'output_text', 'text': '', 'annotations': []}})}}\n\n"
+    
+    try:
+        buffer = ""
+        async for chunk in chat_stream.aiter_bytes():
+            if not chunk:
+                continue
+            
+            buffer += chunk.decode("utf-8", errors="replace")
+            
+            # Process complete SSE lines
+            while "\n\n" in buffer or "\r\n\r\n" in buffer:
+                if "\r\n\r\n" in buffer:
+                    line, buffer = buffer.split("\r\n\r\n", 1)
+                else:
+                    line, buffer = buffer.split("\n\n", 1)
+                
+                if not line.strip():
+                    continue
+                
+                # Parse SSE data line
+                for sub_line in line.split("\n"):
+                    if sub_line.startswith("data: "):
+                        data_str = sub_line[6:]
+                        if data_str.strip() == "[DONE]":
+                            continue
+                        
+                        try:
+                            data = json.loads(data_str)
+                            choices = data.get("choices", [])
+                            for choice in choices:
+                                delta = choice.get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    full_content += content
+                                    # Emit text delta
+                                    yield f"event: response.output_text.delta\ndata: {json.dumps({'type': 'response.output_text.delta', 'item_id': message_id, 'output_index': 0, 'content_index': 0, 'delta': content})}\n\n"
+                        except json.JSONDecodeError:
+                            pass
+    finally:
+        await chat_stream.aclose()
+    
+    # Content part done
+    yield f"event: response.content_part.done\ndata: {json.dumps({'type': 'response.content_part.done', 'item_id': message_id, 'output_index': 0, 'content_index': 0, 'part': {'type': 'output_text', 'text': full_content, 'annotations': []}})}\n\n"
+    
+    # Output item done
+    yield f"event: response.output_item.done\ndata: {json.dumps({'type': 'response.output_item.done', 'output_index': 0, 'item': {'type': 'message', 'id': message_id, 'status': 'completed', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': full_content, 'annotations': []}]}})}}\n\n"
+    
+    # Response done
+    final_response = {
+        "id": response_id,
+        "object": "response",
+        "created_at": created_at,
+        "status": "completed",
+        "completed_at": int(time.time()),
+        "model": model,
+        "output": [{
+            "type": "message",
+            "id": message_id,
+            "status": "completed",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": full_content, "annotations": []}]
+        }],
+        "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    }
+    yield f"event: response.done\ndata: {json.dumps({'type': 'response.done', 'response': final_response})}\n\n"
+
+@app.post("/responses")
+@app.post("/v1/responses")
+async def create_response(request: Request):
+    """Create a model response (OpenAI Responses API compatible)."""
+    body = await request.json()
+    
+    model = body.get("model", "gpt-4o")
+    input_data = body.get("input", "")
+    instructions = body.get("instructions")
+    stream = body.get("stream", False)
+    temperature = body.get("temperature")
+    top_p = body.get("top_p")
+    max_output_tokens = body.get("max_output_tokens")
+    tools = body.get("tools", [])
+    tool_choice = body.get("tool_choice")
+    previous_response_id = body.get("previous_response_id")
+    
+    # Build messages from previous response if provided
+    messages = []
+    if previous_response_id and previous_response_id in response_storage:
+        prev_resp = response_storage[previous_response_id]
+        # Add output from previous response as context
+        for out_item in prev_resp.get("output", []):
+            if out_item.get("type") == "message":
+                role = out_item.get("role", "assistant")
+                content_parts = out_item.get("content", [])
+                text_content = " ".join(
+                    c.get("text", "") for c in content_parts 
+                    if c.get("type") in ("output_text", "input_text", "text")
+                )
+                if text_content:
+                    messages.append({"role": role, "content": text_content})
+    
+    # Add current input
+    messages.extend(translate_responses_input_to_messages(input_data, instructions))
+    
+    # Build chat completion payload
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": stream,
+    }
+    
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if max_output_tokens is not None:
+        payload["max_tokens"] = max_output_tokens
+    
+    # Convert tools from Responses format to chat format
+    if tools:
+        chat_tools = []
+        for tool in tools:
+            tool_type = tool.get("type", "function")
+            if tool_type == "function":
+                chat_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.get("name", ""),
+                        "description": tool.get("description", ""),
+                        "parameters": tool.get("parameters", {})
+                    }
+                })
+        if chat_tools:
+            payload["tools"] = chat_tools
+    
+    if tool_choice:
+        payload["tool_choice"] = tool_choice
+    
+    response_id = f"resp_{uuid.uuid4().hex[:48]}"
+    created_at = int(time.time())
+    
+    if stream:
+        chat_stream = await create_chat_completions(payload, stream=True)
+        
+        if chat_stream.status_code != 200:
+            try:
+                error_text = (await chat_stream.aread()).decode("utf-8", errors="replace")
+            finally:
+                await chat_stream.aclose()
+            raise HTTPException(status_code=chat_stream.status_code, detail=error_text)
+        
+        track_request(model, True)
+        
+        return StreamingResponse(
+            stream_responses_format(chat_stream, response_id, model, created_at),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+        )
+    else:
+        chat_response = await create_chat_completions(payload, stream=False)
+        result = chat_response.json()
+        
+        # Track usage
+        usage = result.get("usage", {})
+        track_request(
+            model,
+            True,
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0)
+        )
+        
+        # Build Responses API format
+        response_obj = translate_chat_response_to_responses_format(
+            result, response_id, model, created_at
+        )
+        
+        # Store for retrieval and multi-turn
+        if len(response_storage) >= RESPONSE_STORAGE_MAX:
+            # Remove oldest
+            oldest_key = next(iter(response_storage))
+            del response_storage[oldest_key]
+        response_storage[response_id] = response_obj
+        
+        return response_obj
+
+@app.get("/responses/{response_id}")
+@app.get("/v1/responses/{response_id}")
+async def get_response(response_id: str):
+    """Get a model response by ID."""
+    if response_id not in response_storage:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": f"Response '{response_id}' not found", "type": "invalid_request_error"}}
+        )
+    return response_storage[response_id]
+
+@app.delete("/responses/{response_id}")
+@app.delete("/v1/responses/{response_id}")
+async def delete_response(response_id: str):
+    """Delete a model response."""
+    if response_id in response_storage:
+        del response_storage[response_id]
+    return {"id": response_id, "object": "response", "deleted": True}
+
+@app.post("/responses/input_tokens")
+@app.post("/v1/responses/input_tokens")
+async def responses_input_tokens(request: Request):
+    """Count input tokens for a Responses API request."""
+    body = await request.json()
+    
+    input_data = body.get("input", "")
+    instructions = body.get("instructions", "")
+    
+    total_chars = len(instructions) if instructions else 0
+    
+    if isinstance(input_data, str):
+        total_chars += len(input_data)
+    elif isinstance(input_data, list):
+        for item in input_data:
+            if isinstance(item, str):
+                total_chars += len(item)
+            elif isinstance(item, dict):
+                content = item.get("content", "")
+                if isinstance(content, str):
+                    total_chars += len(content)
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict):
+                            total_chars += len(block.get("text", ""))
+    
+    estimated_tokens = max(1, total_chars // 4)
+    return {"object": "response.input_tokens", "input_tokens": estimated_tokens}
+
+# =============================================================================
 # Authentication Page
 # =============================================================================
 
