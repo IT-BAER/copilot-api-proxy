@@ -504,12 +504,113 @@ def check_rate_limit():
 # API Request Handling
 # =============================================================================
 
+def validate_and_fix_tool_messages(messages: list) -> list:
+    """
+    Validate and fix tool message ordering.
+    
+    OpenAI/Copilot API requires that messages with role 'tool' must immediately
+    follow an assistant message that contains 'tool_calls' with a matching tool_call_id.
+    
+    Some clients (like n8n/LangChain) may not properly include the assistant's tool_calls
+    in subsequent requests. This function attempts to fix such issues.
+    """
+    if not messages:
+        return messages
+    
+    fixed_messages = []
+    pending_tool_messages = []
+    
+    for i, msg in enumerate(messages):
+        role = msg.get("role")
+        
+        if role == "tool":
+            tool_call_id = msg.get("tool_call_id")
+            
+            # Check if the previous message is an assistant with matching tool_calls
+            if fixed_messages:
+                prev_msg = fixed_messages[-1]
+                if prev_msg.get("role") == "assistant" and prev_msg.get("tool_calls"):
+                    # Check if any tool_call matches
+                    matching = any(
+                        tc.get("id") == tool_call_id 
+                        for tc in prev_msg.get("tool_calls", [])
+                    )
+                    if matching:
+                        fixed_messages.append(msg)
+                        continue
+            
+            # No matching assistant message - we need to synthesize one
+            # or collect for batch synthesis
+            pending_tool_messages.append(msg)
+        else:
+            # If we have pending tool messages and hit a non-tool message,
+            # we need to insert a synthetic assistant message
+            if pending_tool_messages:
+                synthetic_tool_calls = []
+                for tm in pending_tool_messages:
+                    tc_id = tm.get("tool_call_id", f"call_{uuid.uuid4().hex[:8]}")
+                    synthetic_tool_calls.append({
+                        "id": tc_id,
+                        "type": "function",
+                        "function": {
+                            "name": "tool_execution",
+                            "arguments": "{}"
+                        }
+                    })
+                    # Update the tool message to use the synthesized ID if missing
+                    if not tm.get("tool_call_id"):
+                        tm["tool_call_id"] = tc_id
+                
+                # Insert synthetic assistant message before tool messages
+                fixed_messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": synthetic_tool_calls
+                })
+                fixed_messages.extend(pending_tool_messages)
+                pending_tool_messages = []
+            
+            fixed_messages.append(msg)
+    
+    # Handle any remaining pending tool messages at the end
+    if pending_tool_messages:
+        synthetic_tool_calls = []
+        for tm in pending_tool_messages:
+            tc_id = tm.get("tool_call_id", f"call_{uuid.uuid4().hex[:8]}")
+            synthetic_tool_calls.append({
+                "id": tc_id,
+                "type": "function",
+                "function": {
+                    "name": "tool_execution",
+                    "arguments": "{}"
+                }
+            })
+            if not tm.get("tool_call_id"):
+                tm["tool_call_id"] = tc_id
+        
+        fixed_messages.append({
+            "role": "assistant",
+            "content": None,
+            "tool_calls": synthetic_tool_calls
+        })
+        fixed_messages.extend(pending_tool_messages)
+    
+    return fixed_messages
+
 async def create_chat_completions(payload: dict, stream: bool = False):
     """Create chat completions using Copilot API."""
     if not refresh_copilot_token():
         raise HTTPException(status_code=401, detail="Failed to refresh Copilot token")
     
     check_rate_limit()
+    
+    # Validate and fix tool message ordering
+    if any(msg.get("role") == "tool" for msg in payload.get("messages", [])):
+        original_count = len(payload.get("messages", []))
+        payload["messages"] = validate_and_fix_tool_messages(payload.get("messages", []))
+        new_count = len(payload["messages"])
+        if original_count != new_count:
+            print(f"Fixed tool message ordering: {original_count} -> {new_count} messages")
     
     # Check if any message contains images (vision request)
     enable_vision = False
