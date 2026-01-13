@@ -628,20 +628,6 @@ async def create_chat_completions(payload: dict, stream: bool = False):
         for msg in payload.get("messages", [])
     )
     
-    # Log tool calls for debugging
-    if payload.get("tools"):
-        print(f"\n{'='*60}")
-        print(f"TOOL CALL REQUEST DEBUG")
-        print(f"Model: {payload.get('model')}")
-        print(f"Stream: {stream}")
-        print(f"Number of tools: {len(payload.get('tools', []))}")
-        print(f"Tool choice: {payload.get('tool_choice')}")
-        for i, tool in enumerate(payload.get("tools", [])):
-            print(f"  Tool {i+1}: {tool.get('type', 'unknown')} - {tool.get('function', {}).get('name', 'unnamed')}")
-        print(f"Messages count: {len(payload.get('messages', []))}")
-        print(f"Full payload: {json.dumps(payload, indent=2, default=str)[:2000]}...")
-        print(f"{'='*60}\n")
-    
     headers = copilot_headers(vision=enable_vision)
     headers["X-Initiator"] = "agent" if is_agent_call else "user"
     
@@ -654,22 +640,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
             headers=headers,
             json=payload
         )
-        response = await client.send(request, stream=True)
-        
-        # Log streaming errors with tool calls
-        if response.status_code != 200 and payload.get("tools"):
-            try:
-                error_body = (await response.aread()).decode("utf-8", errors="replace")
-                print(f"\n{'!'*60}")
-                print(f"STREAMING TOOL CALL ERROR")
-                print(f"Status: {response.status_code}")
-                print(f"Headers: {dict(response.headers)}")
-                print(f"Body: {error_body}")
-                print(f"{'!'*60}\n")
-            except Exception as e:
-                print(f"Could not read error body: {e}")
-        
-        return response
+        return await client.send(request, stream=True)
     else:
         # Regular request
         client = state["http_client"] or httpx.AsyncClient(http2=True)
@@ -682,15 +653,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
         
         if response.status_code != 200:
             error_text = response.text
-            print(f"\n{'!'*60}")
-            print(f"CHAT COMPLETION ERROR")
-            print(f"Status: {response.status_code}")
-            print(f"Headers: {dict(response.headers)}")
-            print(f"Body: {error_text}")
-            if payload.get("tools"):
-                print(f"This was a TOOL CALL request")
-                print(f"Model: {payload.get('model')}")
-            print(f"{'!'*60}\n")
+            print(f"Chat completion failed: {error_text}")
             raise HTTPException(status_code=response.status_code, detail=error_text)
         
         return response
