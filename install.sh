@@ -32,15 +32,15 @@ BOLD='\033[1m'
 # Functions
 # =============================================================================
 print_banner() {
-    echo -e "${CYAN}"
-    echo "╔═══════════════════════════════════════════════════════════════╗"
-    echo "║                                                               ║"
-    echo "║               ${BOLD}Copilot API Proxy Installer${NC}${CYAN}                    ║"
-    echo "║                                                               ║"
-    echo "║   OpenAI & Anthropic Compatible API for GitHub Copilot       ║"
-    echo "║                                                               ║"
-    echo "╚═══════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
+    echo ""
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║                                                               ║${NC}"
+    echo -e "${CYAN}║           ${BOLD}${GREEN}Copilot API Proxy Installer${NC}${CYAN}                        ║${NC}"
+    echo -e "${CYAN}║                                                               ║${NC}"
+    echo -e "${CYAN}║   OpenAI & Anthropic Compatible API for GitHub Copilot       ║${NC}"
+    echo -e "${CYAN}║                                                               ║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
 }
 
 log_info() {
