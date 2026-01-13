@@ -1,8 +1,11 @@
 [Unit]
 Description=GitHub Copilot API Proxy (OpenAI & Anthropic Compatible)
-After=network.target
+Documentation=https://github.com/IT-BAER/copilot-api-proxy
+After=network.target network-online.target
+Wants=network-online.target
 
 [Service]
+Type=simple
 User=root
 WorkingDirectory=/opt/copilot-api-proxy
 Environment="PORT=4141"
@@ -14,6 +17,13 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/copilot-api-proxy/data
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
